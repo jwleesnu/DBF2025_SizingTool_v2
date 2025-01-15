@@ -49,6 +49,7 @@ class AircraftAnalysisResults:
     # Mass properties
     m_pipe: float
     m_wing: float
+    m_empty: float
     m_fuel: float # Must be gt 0, 
     
     Lw: float
@@ -66,7 +67,7 @@ class AircraftAnalysisResults:
     CL: np.ndarray
 
     CD_wing: np.ndarray
-    CD_fuse: np.ndarray # Must be set manually!
+    CD_fuse: np.ndarray ## (TODO: integrate CFD)
     CD_total: np.ndarray
     
     # Flaps
@@ -80,10 +81,10 @@ class AircraftAnalysisResults:
 class MissionParameters:
     """Additional Parameters for running the mission(s)"""
 
-    # etc
-    Thrust_max: float
+    max_climb_angle: float
 
-    # Throttle 
+    # Thrust and Throttle 
+    Thrust_max: float
     throttle_climb: float
     throttle_turn: float
     throttle_level: float

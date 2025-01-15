@@ -1,8 +1,6 @@
 """ All the configs for the constraints of simulations etc. """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
-import numpy as np
 
 
 @dataclass
@@ -13,12 +11,11 @@ class PhysicalConstants:
 
 @dataclass
 class PresetValues:
-    m_fuselage: float ## or m_empty?
     m_x1: float
     x1_flight_time: float
     max_battery_capacity: float
     Thrust_max: float
-    score_weight_ratio: float=0
+    score_weight_ratio: float=1 # What is this?
 
 
 @dataclass
