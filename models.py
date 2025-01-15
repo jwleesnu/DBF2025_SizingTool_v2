@@ -23,11 +23,13 @@ class Aircraft:
     mainwing_twist: float
     mainwing_sweepback: float
     mainwing_dihedral: float
+    mainwing_incidence: float
 
     # Flap properties
     flap_start: float
     flat_end: float
     flap_angle: float
+    flap_c_ratio: float
 
     # Tail properties
     horizontal_volume_ratio: float
