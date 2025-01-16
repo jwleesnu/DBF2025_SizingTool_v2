@@ -44,8 +44,8 @@ def main():
 
     vspAnalyzer = VSPAnalyzer(physicalConstants ,presetValues)
     vspAnalyzer.setup_vsp_model(aircraft)
-    #analResults = vspAnalyzer.calculateCoefficients(alpha_start=13,alpha_end=15,alpha_step=1,clearModel=False)
-    #print(writeAnalysisResults(analResults))
+    analResults = vspAnalyzer.calculateCoefficients(alpha_start=13,alpha_end=15,alpha_step=0.5,CD_fuse=np.zeros(4),clearModel=False)
+    writeAnalysisResults(analResults)
 
 if __name__== "__main__":
     main()

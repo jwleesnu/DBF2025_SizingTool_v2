@@ -36,8 +36,9 @@ class VSPAnalyzer:
 
         self.horizontal_tail_id = self.createHorizontalTailWing(aircraft)
         self.vertical_tail_R_id,self.vertical_tail_L_id = self.createVerticalTailWings(aircraft)
-
-        vsp.WriteVSPFile(os.path.join(self.outputPath,fileName))
+        
+        vsp.Update()
+        vsp.WriteVSPFile(os.path.join(self.outputPath,fileName),vsp.SET_ALL)
         
     def calculateCoefficients(self,fileName:str = "Mothership.vsp3", 
                               alpha_start: float=0, alpha_end: float=1, alpha_step:float=0.5, 
@@ -55,6 +56,7 @@ class VSPAnalyzer:
         # Input sanitation
         if(CD_fuse.size != point_number): 
             raise ValueError(f"CD_fuse size({CD_fuse.size}) doesn't match point_number({point_number})")
+
         if(clearModel):
             vsp.ClearVSPModel()
 
@@ -65,8 +67,9 @@ class VSPAnalyzer:
                 raise FileNotFoundError(f"Model file {fileName} not found.")
 
         vsp.ReadVSPFile(os.path.join(self.outputPath,fileName))
-
+        
         # Geometric analysis
+        print("Starting Geometric Analysis")
         geom_analysis = "VSPAEROComputeGeometry"
         vsp.SetAnalysisInputDefaults(geom_analysis)
         vsp.ExecAnalysis(geom_analysis)
@@ -81,24 +84,10 @@ class VSPAnalyzer:
         Sref = vsp.GetParmVal(vsp.GetParm(self.wing_id,"TotalArea","WingGeom"))
         wing_c_root = vsp.GetParmVal(vsp.GetParm(self.wing_id,"Root_Chord","XSec_1"))
         tail_c_root = vsp.GetParmVal(vsp.GetParm(self.horizontal_tail_id,"Root_Chord","XSec_1"))
-
-
-        # Configure sweep analysis for coefficient
-        sweep_analysis = "VSPAEROSweep"
-        vsp.SetAnalysisInputDefaults(sweep_analysis)
-        vsp.SetIntAnalysisInput(sweep_analysis, "AnalysisMethod", [vsp.VORTEX_LATTICE])
-        vsp.SetIntAnalysisInput(sweep_analysis, "GeomSet", [vsp.SET_ALL])
-
-        # **Set the reference geometry set**
-        vsp.SetDoubleAnalysisInput(sweep_analysis, "MachStart", [Mach])
-        vsp.SetDoubleAnalysisInput(sweep_analysis, "ReCref", [Re])
-        vsp.SetDoubleAnalysisInput(sweep_analysis, "AlphaStart", [alpha_start])
-        vsp.SetDoubleAnalysisInput(sweep_analysis, "AlphaEnd", [alpha_end])
-        vsp.SetIntAnalysisInput(sweep_analysis, "AlphaNpts", [point_number])
-        vsp.Update()
-
+        print("Finished Geometric Analysis")
 
         # Mass Analysis
+        print("Starting Mass Analysis")
         vsp.ComputeMassProps(0, 100, 0)
         mass_results_id = vsp.FindLatestResultsID("Mass_Properties")
         mass_data = vsp.GetDoubleResults(mass_results_id, "Total_Mass")
@@ -113,10 +102,7 @@ class VSPAnalyzer:
         
         m_boom = horizontal_distance * boom_density_big
         
-        ## TODO decide order (whether or not to set m_total instead of payload)
         ## TODO if m_fuel < 0 exit early
-        
-
 
         m_fuel = self.aircraft.m_total - m_wing - m_boom - self.aircraft.m_fuselage - self.presets.m_x1
         
@@ -128,9 +114,34 @@ class VSPAnalyzer:
         lw = w_ac - mass_center_x
         lh = h_ac - mass_center_x
 
+        print("Finished Mass Analysis")
+
+        # Configure sweep analysis for coefficient
+        print("Starting Sweep Analysis")
+        sweep_analysis = "VSPAEROSweep"
+        vsp.SetAnalysisInputDefaults(sweep_analysis)
+        vsp.SetIntAnalysisInput(sweep_analysis, "AnalysisMethod", [vsp.VORTEX_LATTICE])
+        vsp.SetIntAnalysisInput(sweep_analysis, "GeomSet", [vsp.SET_ALL])
+
+        # **Set the reference geometry set**
+        vsp.SetDoubleAnalysisInput(sweep_analysis, "MachStart", [Mach])
+        vsp.SetDoubleAnalysisInput(sweep_analysis, "ReCref", [Re])
+        vsp.SetDoubleAnalysisInput(sweep_analysis, "AlphaStart", [alpha_start])
+        vsp.SetDoubleAnalysisInput(sweep_analysis, "AlphaEnd", [alpha_end])
+        vsp.SetIntAnalysisInput(sweep_analysis, "AlphaNpts", [point_number])
+
+        # Number of CPUs
+        vsp.SetIntAnalysisInput(sweep_analysis, "NCPU", [6])
+
+        # Disable CpSlice
+        aero_id = vsp.FindContainer("VSPAEROSettings",0);
+        vsp.SetParmVal(aero_id,"CpSliceFlag","VSPAERO",0);
+        vsp.Update()
+
         # Execute sweep analysis
         sweep_results_id = vsp.ExecAnalysis(sweep_analysis)
 
+        print("Finished Sweep Analysis")
 
         # Extract coefficient data
         sweepResults = vsp.GetStringResults(sweep_results_id, "ResultsVec")
@@ -258,9 +269,9 @@ class VSPAnalyzer:
     
     
             vsp.SetVSPAEROControlGroupName("Flap"+str(i)+"_l", flap_group_l)
-            vsp.AddSelectedToCSGroup([1], flap_group_l)
+            vsp.AddSelectedToCSGroup([1+2*(i-1)], flap_group_l)
             vsp.SetVSPAEROControlGroupName("Flap"+str(i)+"_r", flap_group_r)
-            vsp.AddSelectedToCSGroup([2], flap_group_r)
+            vsp.AddSelectedToCSGroup([2+2*(i-1)], flap_group_r)
     
             container_id = vsp.FindContainer("VSPAEROSettings", 0)
 
@@ -423,23 +434,11 @@ class VSPAnalyzer:
 
 def writeAnalysisResults(anaResults: AircraftAnalysisResults, csvPath:str = "data/test.csv"):
     df = pd.read_csv(csvPath, sep=',', encoding='utf-8')
-
+    
     new_df = pd.json_normalize(asdict(anaResults))
-    new_df['hash'] = anaResults.aircraft.hash()
 
-    existing_ids = df['hash'].values
-    updates = new_df[new_df['hash'].isin(existing_ids)]
-    additions = new_df[~new_df[id_column].isin(existing_ids)]
-    
-    # Update existing entries
-    for _, row in updates.iterrows():
-        df.loc[df[id_column] == row[id_column]] = row
-        
-    # Append new entries
-    df = pd.concat([df, additions], ignore_index=True)
-    
+    new_df['hash'] = hash(anaResults.aircraft)
+
+    df= pd.concat([df,new_df]).drop_duplicates(["hash"],keep='last')
     # Save the updated DataFrame back to CSV
     df.to_csv(csvPath, index=False)
-    pass    
-
-

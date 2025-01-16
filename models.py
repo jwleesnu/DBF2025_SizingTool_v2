@@ -1,7 +1,9 @@
 """Core data structures for aircraft and analysis results"""
 import numpy as np
 from typing import List
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+import hashlib
+import json
 from config import PhysicalConstants, PresetValues
 
 @dataclass
@@ -40,6 +42,50 @@ class Aircraft:
     vertical_volume_ratio: float
     vertical_taper: float
     vertical_ThickChord: float
+
+    ## TODO add hash
+    def __hash__(self) -> int:
+            # Convert all the numerical values to strings with fixed precision
+            # to ensure consistent hashing across different instances
+            def format_number(n: float) -> str:
+                return f"{n:.6f}"  # 6 decimal places should be sufficient for most cases
+            
+            # Create a dictionary of all fields with formatted values
+            hash_dict = {
+                "m_total": format_number(self.m_total),
+                "m_fuselage": format_number(self.m_fuselage),
+                "wing_density": format_number(self.wing_density),
+                "spar_density": format_number(self.spar_density),
+                "mainwing_span": format_number(self.mainwing_span),
+                "mainwing_AR": format_number(self.mainwing_AR),
+                "mainwing_taper": format_number(self.mainwing_taper),
+                "mainwing_twist": format_number(self.mainwing_twist),
+                "mainwing_sweepback": format_number(self.mainwing_sweepback),
+                "mainwing_dihedral": format_number(self.mainwing_dihedral),
+                "mainwing_incidence": format_number(self.mainwing_incidence),
+                # For lists, format each element
+                "flap_start": [format_number(x) for x in self.flap_start],
+                "flap_end": [format_number(x) for x in self.flap_end],
+                "flap_angle": [format_number(x) for x in self.flap_angle],
+                "flap_c_ratio": [format_number(x) for x in self.flap_c_ratio],
+                "horizontal_volume_ratio": format_number(self.horizontal_volume_ratio),
+                "horizontal_area_ratio": format_number(self.horizontal_area_ratio),
+                "horizontal_AR": format_number(self.horizontal_AR),
+                "horizontal_taper": format_number(self.horizontal_taper),
+                "horizontal_ThickChord": format_number(self.horizontal_ThickChord),
+                "vertical_volume_ratio": format_number(self.vertical_volume_ratio),
+                "vertical_taper": format_number(self.vertical_taper),
+                "vertical_ThickChord": format_number(self.vertical_ThickChord),
+            }
+            
+            # Convert dictionary to a sorted JSON string to ensure consistent ordering
+            json_str = json.dumps(hash_dict, sort_keys=True)
+            
+            # Create a hash using SHA-256
+            hash_obj = hashlib.sha256(json_str.encode())
+            
+            # Convert the first 8 bytes of the hash to an integer
+            return int.from_bytes(hash_obj.digest()[:8], byteorder='big')
 
 
 @dataclass
