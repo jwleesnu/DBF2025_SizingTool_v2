@@ -1,5 +1,6 @@
 """Core data structures for aircraft and analysis results"""
 import numpy as np
+from typing import List
 from dataclasses import dataclass
 from config import PhysicalConstants, PresetValues
 
@@ -14,7 +15,6 @@ class Aircraft:
     # Mass properties of the aircraft
     wing_density: float
     spar_density: float
-    boom_density: float
 
     # Main Wing properties
     mainwing_span: float
@@ -26,10 +26,10 @@ class Aircraft:
     mainwing_incidence: float
 
     # Flap properties
-    flap_start: float
-    flat_end: float
-    flap_angle: float
-    flap_c_ratio: float
+    flap_start: List[float]
+    flap_end: List[float]
+    flap_angle: List[float]
+    flap_c_ratio: List[float]
 
     # Tail properties
     horizontal_volume_ratio: float
@@ -46,17 +46,21 @@ class Aircraft:
 class AircraftAnalysisResults:
     """Aerodynamic Weight analysis results, along with a reference to the aircraft"""
     aircraft: Aircraft
-    alpha_list: np.ndarray
 
     # Mass properties
-    m_pipe: float
+    m_boom: float
     m_wing: float
-    m_empty: float
+    #m_empty: float
     m_fuel: float # Must be gt 0, 
     
     Lw: float
     Lh: float
-    
+
+    # Geometric properties
+    span: float
+    AR: float
+    taper : float
+    twist : float
     # Aerodynamic properties
     Sref: float
 

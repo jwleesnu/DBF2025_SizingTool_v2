@@ -1,6 +1,8 @@
 import openvsp as vsp
 import numpy as np
 from typing import List
+from dataclasses import asdict
+import typing
 import os
 import math
 import matplotlib.pyplot as plt
@@ -17,32 +19,173 @@ from config import PhysicalConstants, PresetValues
 
 
 class VSPAnalyzer:
-    def __init__(self, constants: PhysicalConstants, presets: PresetValues, dataPath: str="./data", outputPath: str="./out/Mothership.vsp3"):
+    def __init__(self, constants: PhysicalConstants, presets: PresetValues, 
+                 dataPath: str="data", outputPath: str="out"):
         self.constants = constants
         self.presets = presets
-        self._vsp_model = None
         self.dataPath = dataPath
         self.outputPath = outputPath
         vsp.VSPCheckSetup()
           
         
-    def setup_vsp_model(self, aircraft: Aircraft) -> None:
+    def setup_vsp_model(self, aircraft: Aircraft,fileName:str = "Mothership.vsp3") -> None:
         """Creates or updates OpenVSP model based on aircraft parameters"""
-
-        # Define filepaths
-        vsp_file = os.path.join(os.path.join(self.dataPath, "Mothership.vsp3"))
-        
+        self.aircraft = aircraft
         self.wing_id = self.createMainWing(aircraft)
         self.flap_id = self.createFlap(aircraft)
+
         self.horizontal_tail_id = self.createHorizontalTailWing(aircraft)
         self.vertical_tail_R_id,self.vertical_tail_L_id = self.createVerticalTailWings(aircraft)
-            
-        # Mass TODO mass analysis
-        m_fuselage = aircraft.m_fuselage 
-        m_payload = 1 # TODO move this to the mass analysis section
+
+        vsp.WriteVSPFile(os.path.join(self.outputPath,fileName))
+        
+    def calculateCoefficients(self,fileName:str = "Mothership.vsp3", 
+                              alpha_start: float=0, alpha_end: float=1, alpha_step:float=0.5, 
+                              CD_fuse: np.ndarray=np.zeros(2),
+                              Re:float=38000, Mach:float=0, 
+                              boom_density_2018:float = 0.098, 
+                              boom_density_1614:float = 0.087,
+                              boom_density_86:float = 0.036,
+                              boom_density_big:float=0.098,
+                              clearModel:bool=True):
+
+        # Set the Number of points for alpha
+        point_number = round(int((alpha_end-alpha_start)/alpha_step))
+       
+        # Input sanitation
+        if(CD_fuse.size != point_number): 
+            raise ValueError(f"CD_fuse size({CD_fuse.size}) doesn't match point_number({point_number})")
+        if(clearModel):
+            vsp.ClearVSPModel()
+
+        vsp.VSPRenew()
+        
+        if(clearModel):
+            if not os.path.exists(os.path.join(self.outputPath,fileName)):
+                raise FileNotFoundError(f"Model file {fileName} not found.")
+
+        vsp.ReadVSPFile(os.path.join(self.outputPath,fileName))
+
+        # Geometric analysis
+        geom_analysis = "VSPAEROComputeGeometry"
+        vsp.SetAnalysisInputDefaults(geom_analysis)
+        vsp.ExecAnalysis(geom_analysis)
+
+        # Configure VSPAERO
+        vsp.SetVSPAERORefWingID(self.wing_id) ##### wing_id 확인할것
+
+        span = vsp.GetParmVal(vsp.GetParm(self.wing_id,"TotalSpan","WingGeom"))
+        AR = vsp.GetParmVal(vsp.GetParm(self.wing_id,"TotalAR","WingGeom"))
+        taper = vsp.GetParmVal(vsp.GetParm(self.wing_id,"Taper","XSec_1"))
+        twist = vsp.GetParmVal(vsp.GetParm(self.wing_id,"Twist","XSec_1"))
+        Sref = vsp.GetParmVal(vsp.GetParm(self.wing_id,"TotalArea","WingGeom"))
+        wing_c_root = vsp.GetParmVal(vsp.GetParm(self.wing_id,"Root_Chord","XSec_1"))
+        tail_c_root = vsp.GetParmVal(vsp.GetParm(self.horizontal_tail_id,"Root_Chord","XSec_1"))
+
+
+        # Configure sweep analysis for coefficient
+        sweep_analysis = "VSPAEROSweep"
+        vsp.SetAnalysisInputDefaults(sweep_analysis)
+        vsp.SetIntAnalysisInput(sweep_analysis, "AnalysisMethod", [vsp.VORTEX_LATTICE])
+        vsp.SetIntAnalysisInput(sweep_analysis, "GeomSet", [vsp.SET_ALL])
+
+        # **Set the reference geometry set**
+        vsp.SetDoubleAnalysisInput(sweep_analysis, "MachStart", [Mach])
+        vsp.SetDoubleAnalysisInput(sweep_analysis, "ReCref", [Re])
+        vsp.SetDoubleAnalysisInput(sweep_analysis, "AlphaStart", [alpha_start])
+        vsp.SetDoubleAnalysisInput(sweep_analysis, "AlphaEnd", [alpha_end])
+        vsp.SetIntAnalysisInput(sweep_analysis, "AlphaNpts", [point_number])
+        vsp.Update()
+
+
+        # Mass Analysis
+        vsp.ComputeMassProps(0, 100, 0)
+        mass_results_id = vsp.FindLatestResultsID("Mass_Properties")
+        mass_data = vsp.GetDoubleResults(mass_results_id, "Total_Mass")
+
+        span_Projected = vsp.GetParmVal(vsp.GetParm(self.wing_id,"TotalProjectedSpan","WingGeom"))
+        chord_Mean = vsp.GetParmVal(vsp.GetParm(self.wing_id,"TotalChord","WingGeom"))
+        area_Projected = span_Projected * chord_Mean
+        horizontal_distance = self.aircraft.horizontal_volume_ratio * chord_Mean / self.aircraft.horizontal_area_ratio
+
+        m_wing = mass_data[0] \
+                + 2 * (span - 50.0) * (boom_density_1614 + boom_density_2018 + boom_density_86)
+        
+        m_boom = horizontal_distance * boom_density_big
+        
+        ## TODO decide order (whether or not to set m_total instead of payload)
+        ## TODO if m_fuel < 0 exit early
         
 
-    def createMainWing(self, aircraft: Aircraft) -> int:
+
+        m_fuel = self.aircraft.m_total - m_wing - m_boom - self.aircraft.m_fuselage - self.presets.m_x1
+        
+        mass_center_x = 120 # Calculated by CG Calculater, static margin 10%
+
+        # Aerodynamic Center
+        w_ac = 0.25 * 2/3 * wing_c_root * (1 + taper + taper ** 2) / (1 + taper)
+        h_ac = horizontal_distance + 0.25 * tail_c_root
+        lw = w_ac - mass_center_x
+        lh = h_ac - mass_center_x
+
+        # Execute sweep analysis
+        sweep_results_id = vsp.ExecAnalysis(sweep_analysis)
+
+
+        # Extract coefficient data
+        sweepResults = vsp.GetStringResults(sweep_results_id, "ResultsVec")
+        
+        alpha_list = np.zeros(point_number)
+        CL_list = np.zeros(point_number)
+        CDwing_list =np.zeros(point_number)
+                
+        for i in range (point_number):
+            alpha_list[i]= vsp.GetDoubleResults(sweepResults[i], "Alpha")[-1]
+
+            CL_list[i]= vsp.GetDoubleResults(sweepResults[i], "CL")[-1]
+
+            CDwing_list[i] = vsp.GetDoubleResults(sweepResults[i], "CDtot")[-1]
+
+        aircraft=self.aircraft
+
+        
+
+        return AircraftAnalysisResults(
+                aircraft=aircraft,  
+                alpha_list=alpha_list,
+                m_fuel=m_fuel,
+                m_boom=m_boom,
+                m_wing=m_wing,
+        # Geo Mass_Properties
+                span = span,
+                AR = AR,
+                taper = taper,
+                twist = twist,
+                Sref=Sref,
+
+        # TODO Aerodynamic center etc.etc.
+                Lw=lw,Lh=lh,
+                CL=CL_list,
+
+                CD_wing=CDwing_list,
+                CD_fuse=CD_fuse,
+                CD_total=CDwing_list+ CD_fuse,
+
+        # TODO Calculate AOA
+                AOA_stall=10, AOA_climb_max=10, AOA_turn_max=20,
+
+        # TODO Calculate flap coefficients
+                CL_flap_max=0,
+                CL_flap_zero=0,
+                CD_flap_max=0,
+                CD_flap_zero=0
+                )
+
+
+
+
+
+    def createMainWing(self, aircraft: Aircraft) -> str:
 
         s9027_path  = os.path.join(os.path.join(self.dataPath, "s9027.dat"))
 
@@ -59,12 +202,17 @@ class VSPAnalyzer:
         vsp.SetParmVal(wing_id, "Taper", "XSec_1", aircraft.mainwing_taper) 
         vsp.SetParmVal(wing_id, "Twist", "XSec_1", aircraft.mainwing_twist)
         vsp.SetParmVal(wing_id, "Dihedral", "XSec_1", aircraft.mainwing_dihedral)
+
+        # TODO twist 설정 incidence로 할지 안할지
         vsp.SetParmVal(wing_id, "Twist", "XSec_0", aircraft.mainwing_incidence)
+
         vsp.SetParmVal(wing_id, "Sweep", "XSec_1", aircraft.mainwing_sweepback)
         vsp.SetParmVal(wing_id, "Sweep_Location", "XSec_1", 0)
+
         vsp.SetParmVal(wing_id, "X_Rel_Location", "XForm", 0) 
         vsp.SetParmVal(wing_id, "Y_Rel_Location", "XForm", 0)
         vsp.SetParmVal(wing_id, "Z_Rel_Location", "XForm", 0)
+
         vsp.SetParmVal(wing_id, "Density", "Mass_Props", aircraft.wing_density)
         vsp.Update()
         
@@ -78,44 +226,64 @@ class VSPAnalyzer:
         vsp.Update()
 
         return wing_id
-    def createFlap(self,aircraft:Aircraft) -> int:
 
-        # Flap Parameters
-        flap_start = aircraft.flap_start 
-        flap_end = aircraft.flat_end
-        flap_angle = aircraft.flap_angle
-
-
-        # Flap Parameters
-        flap_c_ratio = aircraft.flap_c_ratio
+    def createFlap(self,aircraft:Aircraft) -> List[List[str]]:
         
-        # Create Flap
-        flap_id = vsp.AddSubSurf(self.wing_id,vsp.SS_CONTROL)
-        vsp.SetSubSurfName(self.wing_id, flap_id, "Flap")
-        vsp.SetParmVal(self.wing_id,"EtaFlag","SS_Control_1", 1)
-        vsp.SetParmVal(self.wing_id,"EtaStart","SS_Control_1", flap_start)
-        vsp.SetParmVal(self.wing_id,"EtaEnd","SS_Control_1", flap_end)
-        vsp.SetParmVal(self.wing_id,"Length_C_Start","SS_Control_1", flap_c_ratio)
-        vsp.Update()
-        
-        # Flap settings
-        flap_group = vsp.CreateVSPAEROControlSurfaceGroup()
-        cs_name_vec = vsp.GetAvailableCSNameVec(flap_group)
-        vsp.SetVSPAEROControlGroupName("Flap", flap_group)
-        vsp.AddSelectedToCSGroup([1], flap_group)
-        container_id = vsp.FindContainer("VSPAEROSettings", 0)
-        flap_group_id = vsp.FindParm(container_id, "DeflectionAngle", "ControlSurfaceGroup_0")
-        vsp.SetParmVal(flap_group_id, flap_angle)
-        vsp.Update()
+        if(not(len(self.aircraft.flap_start) == len(self.aircraft.flap_end) == \
+            len(self.aircraft.flap_angle) == len(self.aircraft.flap_c_ratio) )):
+            pass
+           #raise ValueError("Flap config array lengths don't match!")
 
-        return flap_id
+        flap_id_list = []
 
-    def createHorizontalTailWing(self, aircraft:Aircraft,airfoilName:str="naca0008.dat") -> int:
+        ## VSP uses 1-indexing
+        for i in range(1,len(self.aircraft.flap_start)+1):
+            flap_angle = aircraft.flap_angle[i-1]
+            flap_start = aircraft.flap_start[i-1]
+            flap_end = aircraft.flap_end[i-1]
+            flap_c_ratio = aircraft.flap_c_ratio[i-1]
+
+            flap_id = vsp.AddSubSurf(self.wing_id,vsp.SS_CONTROL)
+
+            vsp.SetSubSurfName(self.wing_id, flap_id, "Flaps"+str(i))
+
+            vsp.SetParmVal(self.wing_id,"EtaFlag","SS_Control_"+str(i), 1)
+            vsp.SetParmVal(self.wing_id,"EtaStart","SS_Control_"+str(i), flap_start)
+            vsp.SetParmVal(self.wing_id,"EtaEnd","SS_Control_"+str(i), flap_end)
+            vsp.SetParmVal(self.wing_id,"Length_C_Start","SS_Control_"+str(i), flap_c_ratio)
+            
+            # Flap settings
+            flap_group_l = vsp.CreateVSPAEROControlSurfaceGroup()
+            flap_group_r = vsp.CreateVSPAEROControlSurfaceGroup()
+    
+    
+            vsp.SetVSPAEROControlGroupName("Flap"+str(i)+"_l", flap_group_l)
+            vsp.AddSelectedToCSGroup([1], flap_group_l)
+            vsp.SetVSPAEROControlGroupName("Flap"+str(i)+"_r", flap_group_r)
+            vsp.AddSelectedToCSGroup([2], flap_group_r)
+    
+            container_id = vsp.FindContainer("VSPAEROSettings", 0)
+
+            # ControlSurfaceGroup 이름이 추가할때마다 1씩 증가함.
+            flap_group_id_l = vsp.FindParm(container_id, "DeflectionAngle", 
+                                           "ControlSurfaceGroup_"+str(0+2*(i-1)))
+            flap_group_id_r = vsp.FindParm(container_id, "DeflectionAngle", 
+                                           "ControlSurfaceGroup_"+str(1+2*(i-1)))
+    
+            vsp.SetParmVal(flap_group_id_l, flap_angle)
+            vsp.SetParmVal(flap_group_id_r, -flap_angle)
+            vsp.Update()
+
+            flap_id_list.append([flap_group_id_l,flap_group_r])
+
+        return flap_id_list
+
+    def createHorizontalTailWing(self, aircraft:Aircraft,airfoilName:str="naca0008.dat") -> str:
         """ Create Horizontal Tail, Included Parameters are FIXED """
 
         # Airfoil path
-        
         naca0008_path = os.path.join(os.path.join(self.dataPath, airfoilName))
+
         # Horizontal Tail ID
         tailwing_id = vsp.AddGeom("WING", "")
         vsp.SetGeomName(tailwing_id,"Tail Wing")
@@ -153,23 +321,21 @@ class VSPAnalyzer:
         vsp.SetParmVal(tailwing_id, "X_Rel_Location", "XForm", horizontal_distance)  # Position along X-axis
         vsp.SetParmVal(tailwing_id, "Y_Rel_Location", "XForm", tailwing_yoffset)  # Position along Y-axis
         vsp.SetParmVal(tailwing_id, "Z_Rel_Location", "XForm", tailwing_zoffset)  # Position vertically
+
         vsp.SetParmVal(tailwing_id, "CapUMaxOption", "EndCap" , tailwing_option_tip)
         vsp.SetParmVal(tailwing_id, "CapUMaxLength", "EndCap" , tailwing_length_tip)
         vsp.SetParmVal(tailwing_id, "CapUMaxOffset", "EndCap" , tailwing_offset_tip)
+
         vsp.SetParmVal(tailwing_id, "Density", "Mass_Props", aircraft.wing_density)
+
         vsp.Update()
 
         return tailwing_id
 
-    def createVerticalTailWings(self,aircraft:Aircraft,airfoilName:str="naca0009.dat") -> List[int]:
+    def createVerticalTailWings(self,aircraft:Aircraft,airfoilName:str="naca0009.dat") -> List[str]:
 
         naca0009_path = os.path.join(os.path.join(self.dataPath, airfoilName))
 
-        # Vertical Tail Parameters
-        vertical_volume_ratio = aircraft.vertical_volume_ratio 
-        vertical_taper = aircraft.vertical_taper 
-        vertical_ThickChord = aircraft.vertical_ThickChord 
-        
         """ Create Vertical Wing (Right), Included Parameters are FIXED """
         # Vertical Wing (Right) ID
         verwing_right_id = vsp.AddGeom("WING", "")
@@ -197,18 +363,17 @@ class VSPAnalyzer:
         span_Projected = vsp.GetParmVal(vsp.GetParm(self.wing_id,"TotalProjectedSpan","WingGeom"))
         chord_Mean = vsp.GetParmVal(vsp.GetParm(self.wing_id,"TotalChord","WingGeom"))
         area_Projected = span_Projected * chord_Mean
-        horizontal_area = aircraft.horizontal_area_ratio * area_Projected
         horizontal_distance = aircraft.horizontal_volume_ratio * chord_Mean / aircraft.horizontal_area_ratio
         
         # Parameters related with Main, Horizontal 
         chord_Mean_horizontal = vsp.GetParmVal(vsp.GetParm(self.horizontal_tail_id,"TotalChord","WingGeom"))
-        vertical_area = vertical_volume_ratio * span_Projected * area_Projected / horizontal_distance # vertical_distance = horizontal_distance
+        vertical_area = aircraft.vertical_volume_ratio * span_Projected * area_Projected / horizontal_distance # vertical_distance = horizontal_distance
         vertical_c_root = chord_Mean_horizontal
         
         # Vertical Tail settings
         vsp.SetDriverGroup(verwing_right_id, 1, vsp.AREA_WSECT_DRIVER, vsp.TAPER_WSECT_DRIVER, vsp.ROOTC_WSECT_DRIVER)
         vsp.SetParmVal(verwing_right_id, "Area", "XSec_1", vertical_area / 2)  # Span of the each wing (Half of span)
-        vsp.SetParmVal(verwing_right_id, "Taper", "XSec_1", vertical_taper)  
+        vsp.SetParmVal(verwing_right_id, "Taper", "XSec_1", aircraft.vertical_taper)  
         vsp.SetParmVal(verwing_right_id, "Root_Chord", "XSec_1", vertical_c_root) 
         vsp.SetParmVal(verwing_right_id, "Sweep", "XSec_1", verwing_sweep) #Sweep Angle
         vsp.SetParmVal(verwing_right_id, "X_Rel_Location", "XForm", horizontal_distance)  # Position along X-axis
@@ -239,7 +404,7 @@ class VSPAnalyzer:
         # Vertical Tail settings
         vsp.SetDriverGroup(verwing_left_id, 1, vsp.AREA_WSECT_DRIVER, vsp.TAPER_WSECT_DRIVER, vsp.ROOTC_WSECT_DRIVER)
         vsp.SetParmVal(verwing_left_id, "Area", "XSec_1", vertical_area / 2)  # Span of the each wing (Half of span)
-        vsp.SetParmVal(verwing_left_id, "Taper", "XSec_1", vertical_taper)  
+        vsp.SetParmVal(verwing_left_id, "Taper", "XSec_1", aircraft.vertical_taper)  
         vsp.SetParmVal(verwing_left_id, "Root_Chord", "XSec_1", vertical_c_root) 
         vsp.SetParmVal(verwing_left_id, "Sweep", "XSec_1", verwing_sweep) #Sweep Angle
         vsp.SetParmVal(verwing_left_id, "X_Rel_Location", "XForm", horizontal_distance)  # Position along X-axis
@@ -254,5 +419,27 @@ class VSPAnalyzer:
         vsp.Update()  
 
         return [verwing_right_id,verwing_left_id]
+
+
+def writeAnalysisResults(anaResults: AircraftAnalysisResults, csvPath:str = "data/test.csv"):
+    df = pd.read_csv(csvPath, sep=',', encoding='utf-8')
+
+    new_df = pd.json_normalize(asdict(anaResults))
+    new_df['hash'] = anaResults.aircraft.hash()
+
+    existing_ids = df['hash'].values
+    updates = new_df[new_df['hash'].isin(existing_ids)]
+    additions = new_df[~new_df[id_column].isin(existing_ids)]
+    
+    # Update existing entries
+    for _, row in updates.iterrows():
+        df.loc[df[id_column] == row[id_column]] = row
+        
+    # Append new entries
+    df = pd.concat([df, additions], ignore_index=True)
+    
+    # Save the updated DataFrame back to CSV
+    df.to_csv(csvPath, index=False)
+    pass    
 
 

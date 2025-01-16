@@ -1,2 +1,6 @@
 __pycache__/
 out/
+runContainer.sh
+custom_dir/
+
+.vsp*
