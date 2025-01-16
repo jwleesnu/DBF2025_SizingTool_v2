@@ -1,7 +1,7 @@
 import openvsp as vsp
 import numpy as np
 from typing import List
-from dataclasses import asdict
+from dataclasses import asdict, make_dataclass
 import typing
 import os
 import math
@@ -442,3 +442,8 @@ def writeAnalysisResults(anaResults: AircraftAnalysisResults, csvPath:str = "dat
     df= pd.concat([df,new_df]).drop_duplicates(["hash"],keep='last')
     # Save the updated DataFrame back to CSV
     df.to_csv(csvPath, index=False)
+
+def loadAnalysisResults(hashValue:int, csvPath:str = "data/test.csv")-> AircraftAnalysisResults:
+    df = pd.read_csv(csvPath, sep=',', encoding='utf-8')
+    analResult = df.loc[df['hash']==hashValue].to_dict('records')[0]
+    return AircraftAnalysisResults.fromDict(analResult)

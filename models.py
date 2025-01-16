@@ -129,6 +129,13 @@ class AircraftAnalysisResults:
     CD_flap_max: float
     CD_flap_zero: float
 
+    @classmethod
+    def fromDict(cls, datadict):
+        datadict.pop('hash')
+        aircraft = Aircraft(**{k.replace('aircraft.',''):v for k,v in datadict.items() if  ('aircraft.' in k)})
+        datadict = {k:v for k,v in datadict.items() if not ('aircraft.' in k)}
+        return  cls(**datadict,aircraft=aircraft)
+
 @dataclass
 class MissionParameters:
     """Additional Parameters for running the mission(s)"""

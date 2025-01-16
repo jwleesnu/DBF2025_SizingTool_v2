@@ -1,10 +1,13 @@
 ## Does all the main work
 
-from vsp_analysis import VSPAnalyzer, writeAnalysisResults
+from vsp_analysis import VSPAnalyzer, writeAnalysisResults, loadAnalysisResults
 from config import *
 from models import *
 
 def main():
+    a=loadAnalysisResults(2270606438082248747)
+    print(a)
+    return
     physicalConstants = PhysicalConstants()
 
     presetValues = PresetValues(
