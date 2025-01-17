@@ -1,0 +1,25 @@
+{
+    "name": "bulnabi_aiaa_vscode",
+    "image": "jaewonchung7snu/bulnabi_aiaa_container",
+    "containerEnv": {
+        "LOCAL_USER_ID": "1000",
+        "DISPLAY": ":0",
+        "WAYLAND_DISPLAY": "wayland-0",
+        "XDG_RUNTIME_DIR": "/mnt/wslg/runtime-dir",
+        "PULSE_SERVER": "/mnt/wslg/PulseServer"
+  },
+  "mounts": [
+    "source=/run/desktop/mnt/host/wslg/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
+    "source=/run/desktop/mnt/host/wslg,target=/mnt/wslg,type=bind,consistency=cached"
+  ],
+      "runArgs": [
+    ],
+    "containerUser": "1000",
+    "customizations": {
+      "vscode": {
+        "extensions": [
+            "ms-python.python"
+        ]
+      }
+    }
+  }
