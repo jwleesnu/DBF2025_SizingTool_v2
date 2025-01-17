@@ -3,7 +3,8 @@ import numpy as np
 from typing import List
 from dataclasses import asdict, make_dataclass
 import typing
-import os
+import os 
+import os.path
 import math
 import matplotlib.pyplot as plt
 from scipy.integrate import odeint
@@ -19,9 +20,9 @@ from config import PhysicalConstants, PresetValues
 
 
 class VSPAnalyzer:
-    def __init__(self, constants: PhysicalConstants, presets: PresetValues, 
+    def __init__(self, presets: PresetValues, 
                  dataPath: str="data", outputPath: str="out"):
-        self.constants = constants
+        self.constants = PhysicalConstants
         self.presets = presets
         self.dataPath = dataPath
         self.outputPath = outputPath
@@ -43,6 +44,19 @@ class VSPAnalyzer:
     def calculateCoefficients(self,fileName:str = "Mothership.vsp3", 
                               alpha_start: float=0, alpha_end: float=1, alpha_step:float=0.5, 
                               CD_fuse: np.ndarray=np.zeros(2),
+
+                              AOA_stall:float=10, 
+                              AOA_takeoff_max:float=10,
+                              AOA_climb_max:float=10,
+                              AOA_turn_max:float=20,
+
+                              CL_max: float=0.94,
+
+                              CL_flap_max:float=1.1,
+                              CL_flap_zero:float=0.04,
+                              CD_flap_max:float=0.20,
+                              CD_flap_zero:float=0.10,
+
                               Re:float=38000, Mach:float=0, 
                               boom_density_2018:float = 0.098, 
                               boom_density_1614:float = 0.087,
@@ -174,22 +188,26 @@ class VSPAnalyzer:
                 twist = twist,
                 Sref=Sref,
 
-        # TODO Aerodynamic center etc.etc.
                 Lw=lw,Lh=lh,
                 CL=CL_list,
+
+                CL_max = CL_max,
 
                 CD_wing=CDwing_list,
                 CD_fuse=CD_fuse,
                 CD_total=CDwing_list+ CD_fuse,
 
         # TODO Calculate AOA
-                AOA_stall=10, AOA_climb_max=10, AOA_turn_max=20,
+                AOA_stall=AOA_stall, 
+                AOA_takeoff_max=AOA_takeoff_max,
+                AOA_climb_max=AOA_climb_max, 
+                AOA_turn_max=AOA_turn_max,
 
         # TODO Calculate flap coefficients
-                CL_flap_max=0,
-                CL_flap_zero=0,
-                CD_flap_max=0,
-                CD_flap_zero=0
+                CL_flap_max=CL_flap_max,
+                CL_flap_zero=CL_flap_zero,
+                CD_flap_max=CD_flap_max,
+                CD_flap_zero=CD_flap_zero
                 )
 
 
@@ -433,13 +451,17 @@ class VSPAnalyzer:
 
 
 def writeAnalysisResults(anaResults: AircraftAnalysisResults, csvPath:str = "data/test.csv"):
-    df = pd.read_csv(csvPath, sep=',', encoding='utf-8')
+    if not os.path.isfile(csvPath):
+        df = pd.json_normalize(asdict(anaResults))
+        df['hash'] = hash(anaResults.aircraft)
+    else:
+        new_df = pd.json_normalize(asdict(anaResults))
+
+        new_df['hash'] = hash(anaResults.aircraft)
+        df = pd.read_csv(csvPath, sep=',', encoding='utf-8')
+        df= pd.concat([df,new_df]).drop_duplicates(["hash"],keep='last')
     
-    new_df = pd.json_normalize(asdict(anaResults))
 
-    new_df['hash'] = hash(anaResults.aircraft)
-
-    df= pd.concat([df,new_df]).drop_duplicates(["hash"],keep='last')
     # Save the updated DataFrame back to CSV
     df.to_csv(csvPath, index=False)
 

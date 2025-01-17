@@ -1,20 +1,29 @@
 ## Does all the main work
 
 from vsp_analysis import VSPAnalyzer, writeAnalysisResults, loadAnalysisResults
-from config import *
+from mission_analysis import MissionAnalyzer
 from models import *
 
 def main():
-    a=loadAnalysisResults(2270606438082248747)
-    print(a)
-    return
-    physicalConstants = PhysicalConstants()
-
     presetValues = PresetValues(
             m_x1=1,x1_flight_time=2,
             max_battery_capacity=3,Thrust_max=4,
+            min_battery_voltage=3, propulsion_efficiency=0.5,
             score_weight_ratio=1
             )
+
+    # missionParam = MissionParameters(max_battery_capacity=2250,
+    #                                  throttle_takeoff=0.9, throttle_climb=0.9,
+    #                                  throttle_level=0.6, throttle_turn=0.55,
+    #                                  max_climb_angle=40, max_speed=40, max_load_factor=4.0,
+    #                                  h_flap_transition=5)
+
+    # a=loadAnalysisResults(2270606438082248747)
+
+    # missionAnalyzer = MissionAnalyzer(a,missionParam,presetValues)
+    # 
+    # print(missionAnalyzer.run_mission2())
+
    
     aircraft = Aircraft(
             m_total=50,m_fuselage=10,
@@ -45,9 +54,25 @@ def main():
             vertical_ThickChord=0.08   
             )
 
-    vspAnalyzer = VSPAnalyzer(physicalConstants ,presetValues)
+    vspAnalyzer = VSPAnalyzer(presetValues)
     vspAnalyzer.setup_vsp_model(aircraft)
-    analResults = vspAnalyzer.calculateCoefficients(alpha_start=13,alpha_end=15,alpha_step=0.5,CD_fuse=np.zeros(4),clearModel=False)
+    analResults = vspAnalyzer.calculateCoefficients(
+            alpha_start=13,alpha_end=15,alpha_step=0.5,
+            CD_fuse=np.zeros(4),
+
+            AOA_stall=10, 
+            AOA_takeoff_max=10,
+            AOA_climb_max=10,
+            AOA_turn_max=20,
+                              
+            CL_max=0.94,
+
+            CL_flap_max=1.1,
+            CL_flap_zero=0.04,
+            CD_flap_max=0.20,
+            CD_flap_zero=0.10,
+
+            clearModel=False)
     writeAnalysisResults(analResults)
 
 if __name__== "__main__":

@@ -2,19 +2,23 @@
 
 from dataclasses import dataclass
 
-
 @dataclass
-class PhysicalConstants:
+class __PhysicalConstants__:
     g: float = 9.81
     rho: float = 1.20
 
+PhysicalConstants = __PhysicalConstants__()
 
 @dataclass
 class PresetValues:
     m_x1: float
     x1_flight_time: float
+
     max_battery_capacity: float
+    min_battery_voltage: float
+
     Thrust_max: float
+    propulsion_efficiency: float
     score_weight_ratio: float=1 # What is this?
 
 

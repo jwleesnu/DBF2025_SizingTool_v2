@@ -1,9 +1,10 @@
 """Core data structures for aircraft and analysis results"""
 import numpy as np
 from typing import List
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field
 import hashlib
 import json
+from enum import Enum
 from config import PhysicalConstants, PresetValues
 
 @dataclass
@@ -107,16 +108,19 @@ class AircraftAnalysisResults:
     AR: float
     taper : float
     twist : float
+
     # Aerodynamic properties
     Sref: float
 
     alpha_list: np.ndarray
 
     AOA_stall: float # Must be set manually!
+    AOA_takeoff_max: float # Must be set manually!
     AOA_climb_max: float # Must be set manually!
     AOA_turn_max: float # Must be set manually!
 
     CL: np.ndarray
+    CL_max: float
 
     CD_wing: np.ndarray
     CD_fuse: np.ndarray ## (TODO: integrate CFD)
@@ -141,17 +145,56 @@ class MissionParameters:
     """Additional Parameters for running the mission(s)"""
 
     max_climb_angle: float
+    max_speed: float
+    max_load_factor: float
+    
+    # 
+    h_flap_transition: float
 
     # Thrust and Throttle 
-    Thrust_max: float
+    throttle_takeoff: float
     throttle_climb: float
     throttle_turn: float
     throttle_level: float
 
-    # X-1 Test vehicle
-    m_x1: float
-    x1_flight_time: float
-
     # Battery 
     max_battery_capacity: float
+
+
+@dataclass
+class PlaneState:
+    position: np.ndarray=field(default_factory= lambda: np.zeros(3))
+    velocity: np.ndarray=field(default_factory= lambda: np.zeros(3))
+    acceleration: np.ndarray=field(default_factory= lambda: np.zeros(3))
+
+
+    time: float=0
+
+
+    throttle: float=0 # in percent
+
+    loadfactor: float=0
+    AOA: float=0
+    
+    climb_pitch_angle: float=0
+    bank_angle: float=0
+
+    phase: int=0
+    
+    battery_capacity: float=0
+    battery_voltage: float=0
+    current_draw: float=0
+
+
+class PhaseType(Enum):
+    TAKEOFF=0
+    CLIMB=1
+    LEVEL_FLIGHT=2
+    TURN=3
+    
+@dataclass
+class MissionConfig:
+    phaseType: PhaseType
+    numargs: list[float]
+    direction: str=""
 
